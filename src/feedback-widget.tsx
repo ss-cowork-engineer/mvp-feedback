@@ -8,11 +8,24 @@ export interface FeedbackWidgetProps {
   action: (formData: FormData) => void | Promise<void>;
   brandColor?: string;
   label?: string;
+  /**
+   * Wenn gesetzt, zeigt das Widget eine Checkbox mit diesem Text. Ist sie
+   * angehakt, wird die Meldung als scope="platform" gesendet → landet im
+   * Paket-Repo statt in der App. So fließen FRs übers Feedback-Tool selbst
+   * automatisch upstream, ohne dass jemand Project-Leads briefen muss.
+   */
+  platformOptionLabel?: string;
 }
 
-export function FeedbackWidget({ action, brandColor = "#e20074", label = "Feedback" }: FeedbackWidgetProps) {
+export function FeedbackWidget({
+  action,
+  brandColor = "#e20074",
+  label = "Feedback",
+  platformOptionLabel,
+}: FeedbackWidgetProps) {
   const [open, setOpen] = useState(false);
   const [kind, setKind] = useState<"bug" | "feature">("feature");
+  const [platform, setPlatform] = useState(false);
   const [sent, setSent] = useState(false);
 
   const tabStyle = (active: boolean): React.CSSProperties => ({
@@ -76,6 +89,7 @@ export function FeedbackWidget({ action, brandColor = "#e20074", label = "Feedba
               >
                 <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 12 }}>Feedback geben</div>
                 <input type="hidden" name="kind" value={kind} />
+                <input type="hidden" name="scope" value={platform ? "platform" : "app"} />
                 <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
                   <button type="button" onClick={() => setKind("feature")} style={tabStyle(kind === "feature")}>
                     💡 Idee / Feature
@@ -95,6 +109,17 @@ export function FeedbackWidget({ action, brandColor = "#e20074", label = "Feedba
                     fontSize: 14, resize: "vertical", outline: "none",
                   }}
                 />
+                {platformOptionLabel && (
+                  <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12, fontSize: 13, color: "#9aa0aa", cursor: "pointer" }}>
+                    <input
+                      type="checkbox"
+                      checked={platform}
+                      onChange={(e) => setPlatform(e.target.checked)}
+                      style={{ accentColor: brandColor }}
+                    />
+                    {platformOptionLabel}
+                  </label>
+                )}
                 <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 14 }}>
                   <button type="button" onClick={() => setOpen(false)} style={{ padding: "8px 14px", borderRadius: 8, border: "1px solid #2e333d", background: "transparent", color: "#9aa0aa", cursor: "pointer" }}>
                     Abbrechen

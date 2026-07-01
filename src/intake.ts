@@ -1,4 +1,4 @@
-import type { FeedbackConfig, IntakeInput, IntakeResult } from "./config";
+import type { FeedbackConfig, IntakeInput, IntakeResult, IntakeTarget } from "./config";
 
 // ============================================================
 // Generischer GitHub-Intake (aus dem Magenta-OS-Muster extrahiert, aber
@@ -89,16 +89,21 @@ export async function submitFeedback(config: FeedbackConfig, input: IntakeInput)
   if (!token) return { ok: false, error: "no token configured" };
   if (!input.text?.trim()) return { ok: false, error: "empty text" };
 
+  // Ziel nach Scope wählen: "platform" → Paket-Repo (falls konfiguriert),
+  // sonst die App. So landen FRs übers Feedback-Tool automatisch upstream.
+  const target: IntakeTarget =
+    input.scope === "platform" && config.platform ? config.platform : config;
+
   const typeLabel = input.kind === "bug" ? "type:bug" : "type:feature";
   // Labels sicherstellen (Farben: bug=rot, feature=blau, app=magenta).
-  await ensureLabel(token, config.repo, typeLabel, input.kind === "bug" ? "d73a4a" : "0e8a16");
-  await ensureLabel(token, config.repo, config.appLabel, "e20074");
+  await ensureLabel(token, target.repo, typeLabel, input.kind === "bug" ? "d73a4a" : "0e8a16");
+  await ensureLabel(token, target.repo, target.appLabel, "e20074");
 
   // 1) Issue anlegen.
-  const issue = await ghRest(token, "POST", `/repos/${config.repo}/issues`, {
+  const issue = await ghRest(token, "POST", `/repos/${target.repo}/issues`, {
     title: deriveTitle(input),
     body: buildBody(input),
-    labels: [typeLabel, config.appLabel],
+    labels: [typeLabel, target.appLabel],
   });
   const contentId = issue?.node_id as string | undefined;
   const number = issue?.number as number | undefined;
@@ -107,24 +112,24 @@ export async function submitFeedback(config: FeedbackConfig, input: IntakeInput)
   const result: IntakeResult = { ok: true, issueNumber: number, issueUrl: htmlUrl };
 
   // 2) Aufs Board (optional, best-effort).
-  if (!config.boardProjectId) return result;
+  if (!target.boardProjectId) return result;
   const added = await ghGraphql(
     token,
     `mutation($p:ID!,$c:ID!){ addProjectV2ItemById(input:{projectId:$p,contentId:$c}){ item { id } } }`,
-    { p: config.boardProjectId, c: contentId },
+    { p: target.boardProjectId, c: contentId },
   );
   const itemId = ((added?.addProjectV2ItemById as GhJson | undefined)?.item as GhJson | undefined)?.id as
     | string
     | undefined;
-  if (!itemId || !config.statusFieldId || !config.columnName) return result;
+  if (!itemId || !target.statusFieldId || !target.columnName) return result;
 
   // 3) Ziel-Spalte setzen (per Name aufgelöst; fehlt sie → ohne Status).
-  const optionId = await resolveColumnOptionId(token, config.statusFieldId, config.columnName);
+  const optionId = await resolveColumnOptionId(token, target.statusFieldId, target.columnName);
   if (!optionId) return result;
   await ghGraphql(
     token,
     `mutation($p:ID!,$i:ID!,$f:ID!,$o:String!){ updateProjectV2ItemFieldValue(input:{projectId:$p,itemId:$i,fieldId:$f,value:{singleSelectOptionId:$o}}){ projectV2Item { id } } }`,
-    { p: config.boardProjectId, i: itemId, f: config.statusFieldId, o: optionId },
+    { p: target.boardProjectId, i: itemId, f: target.statusFieldId, o: optionId },
   );
   return result;
 }
