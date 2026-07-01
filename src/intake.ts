@@ -132,8 +132,13 @@ async function buildAttachmentSection(
     if (u) uploaded.push(u);
   }
   if (!uploaded.length) return "";
+  // Inline-Bilder rendert GitHub nur bei ÖFFENTLICHEN Repos (der camo-Proxy
+  // kommt nicht an Assets privater Repos). Bei privaten → klickbarer Link,
+  // der für eingeloggte Board-Mitglieder funktioniert.
+  const repoMeta = await ghRest(token, "GET", `/repos/${target.repo}`);
+  const isPublic = repoMeta?.private === false;
   const lines = uploaded.map((u) =>
-    u.isImage ? `![${u.filename}](${u.url})` : `📎 [${u.filename}](${u.url})`,
+    u.isImage && isPublic ? `[![${u.filename}](${u.url})](${u.url})` : `📎 [${u.filename}](${u.url})`,
   );
   return `\n\n**Anhänge:**\n\n${lines.join("\n\n")}`;
 }
