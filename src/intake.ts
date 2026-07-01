@@ -1,4 +1,6 @@
-import type { FeedbackConfig, IntakeInput, IntakeResult, IntakeTarget } from "./config";
+import type { FeedbackConfig, IntakeAttachment, IntakeInput, IntakeResult, IntakeTarget } from "./config";
+
+const DEFAULT_ATTACHMENT_TAG = "feedback-attachments";
 
 // ============================================================
 // Generischer GitHub-Intake (aus dem Magenta-OS-Muster extrahiert, aber
@@ -47,6 +49,93 @@ async function ghGraphql(token: string, query: string, variables: GhJson): Promi
   } catch {
     return null;
   }
+}
+
+// Release, an das Anhänge gehängt werden, sicherstellen (idempotent). Assets an
+// einem Release liegen auf GitHub (nicht im Git-Baum) → kein Commit/Deploy, und
+// Board-Mitglieder öffnen sie ohne separaten App-Login. Best-effort → null.
+async function ensureAttachmentReleaseId(
+  token: string,
+  repo: string,
+  tag: string,
+): Promise<number | null> {
+  const existing = await ghRest(token, "GET", `/repos/${repo}/releases/tags/${encodeURIComponent(tag)}`);
+  if (existing?.id) return existing.id as number;
+  const created = await ghRest(token, "POST", `/repos/${repo}/releases`, {
+    tag_name: tag,
+    name: "Feedback-Anhänge",
+    body: "Automatisch angelegter Container für In-App-Feedback-Anhänge.",
+    prerelease: true,
+    make_latest: "false",
+  });
+  return (created?.id as number | undefined) ?? null;
+}
+
+// Sanitisiert einen Dateinamen für die Asset-API (keine Slashes/Spaces/Sonderz.).
+function sanitizeAssetName(name: string): string {
+  const base = name.split(/[\\/]/).pop() ?? "datei";
+  return base.replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 100) || "datei";
+}
+
+// Einen Anhang als Release-Asset hochladen. Liefert die öffentliche Download-URL
+// oder null (best-effort). Eindeutiger Name via nonce → keine Kollisionen.
+async function uploadAttachmentAsset(
+  token: string,
+  repo: string,
+  releaseId: number,
+  nonce: string,
+  att: IntakeAttachment,
+): Promise<{ filename: string; url: string; isImage: boolean } | null> {
+  try {
+    const bytes = Buffer.from(att.dataBase64, "base64");
+    if (bytes.length === 0) return null;
+    const safe = sanitizeAssetName(att.filename);
+    const assetName = `${nonce}-${safe}`;
+    const res = await fetch(
+      `https://uploads.github.com/repos/${repo}/releases/${releaseId}/assets?name=${encodeURIComponent(assetName)}`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/vnd.github+json",
+          "Content-Type": att.contentType || "application/octet-stream",
+        },
+        body: bytes,
+        cache: "no-store",
+      },
+    );
+    if (!res.ok) return null;
+    const json = (await res.json()) as { browser_download_url?: string };
+    if (!json.browser_download_url) return null;
+    const isImage = (att.contentType ?? "").startsWith("image/");
+    return { filename: safe, url: json.browser_download_url, isImage };
+  } catch {
+    return null;
+  }
+}
+
+// Lädt alle Anhänge hoch und rendert einen Markdown-Block fürs Issue (Bilder
+// werden inline eingebettet, sonst als Link). Leerer String, wenn nichts klappt.
+async function buildAttachmentSection(
+  token: string,
+  target: IntakeTarget,
+  attachments: IntakeAttachment[] | undefined,
+): Promise<string> {
+  if (!attachments?.length) return "";
+  const tag = target.attachmentReleaseTag ?? DEFAULT_ATTACHMENT_TAG;
+  const releaseId = await ensureAttachmentReleaseId(token, target.repo, tag);
+  if (!releaseId) return "";
+  const nonce = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+  const uploaded = [];
+  for (const att of attachments) {
+    const u = await uploadAttachmentAsset(token, target.repo, releaseId, nonce, att);
+    if (u) uploaded.push(u);
+  }
+  if (!uploaded.length) return "";
+  const lines = uploaded.map((u) =>
+    u.isImage ? `![${u.filename}](${u.url})` : `📎 [${u.filename}](${u.url})`,
+  );
+  return `\n\n**Anhänge:**\n\n${lines.join("\n\n")}`;
 }
 
 // Label anlegen, falls es nicht existiert (idempotent, best-effort).
@@ -99,10 +188,14 @@ export async function submitFeedback(config: FeedbackConfig, input: IntakeInput)
   await ensureLabel(token, target.repo, typeLabel, input.kind === "bug" ? "d73a4a" : "0e8a16");
   await ensureLabel(token, target.repo, target.appLabel, "e20074");
 
+  // Anhänge zuerst hochladen → Links wandern direkt in den Issue-Body, damit
+  // sie mit aufs Board reisen (best-effort; Fehler = Body ohne Anhänge).
+  const attachmentSection = await buildAttachmentSection(token, target, input.attachments);
+
   // 1) Issue anlegen.
   const issue = await ghRest(token, "POST", `/repos/${target.repo}/issues`, {
     title: deriveTitle(input),
-    body: buildBody(input),
+    body: buildBody(input) + attachmentSection,
     labels: [typeLabel, target.appLabel],
   });
   const contentId = issue?.node_id as string | undefined;

@@ -15,6 +15,21 @@ export interface IntakeTarget {
   statusFieldId?: string;
   /** Optional: Ziel-Spaltenname (zur Laufzeit per Name aufgelöst). */
   columnName?: string;
+  /**
+   * Optional: Tag/Name des GitHub-Releases, an das Anhänge als Assets gehängt
+   * werden (Default: "feedback-attachments"). Assets liegen dort, wo das Board
+   * lebt → Board-Mitglieder öffnen sie ohne separaten App-Login, und es entsteht
+   * KEIN Repo-Commit (löst keinen Deploy aus). Wird bei Bedarf angelegt.
+   */
+  attachmentReleaseTag?: string;
+}
+
+/** Ein einzelner Anhang, transport-agnostisch (Base64, damit Server-Actions ihn tragen). */
+export interface IntakeAttachment {
+  filename: string;
+  contentType?: string;
+  /** Base64-kodierter Inhalt (ohne "data:"-Präfix). */
+  dataBase64: string;
 }
 
 export interface FeedbackConfig extends IntakeTarget {
@@ -38,6 +53,8 @@ export interface IntakeInput {
   title?: string;
   /** Wer meldet (für Transparenz im Issue-Body). */
   submitter?: { name?: string | null; email?: string | null } | null;
+  /** Optionale Datei-Anhänge; werden als GitHub-Release-Assets ans Issue gehängt. */
+  attachments?: IntakeAttachment[];
   /**
    * "app" (Default) = betrifft die App → App-Ziel. "platform" = betrifft das
    * Feedback-Tool selbst → wird ins Paket-Repo (config.platform) geroutet.

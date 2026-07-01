@@ -26,6 +26,7 @@ export function FeedbackWidget({
   const [open, setOpen] = useState(false);
   const [kind, setKind] = useState<"bug" | "feature">("feature");
   const [platform, setPlatform] = useState(false);
+  const [fileNames, setFileNames] = useState<string[]>([]);
   const [sent, setSent] = useState(false);
 
   const tabStyle = (active: boolean): React.CSSProperties => ({
@@ -85,7 +86,7 @@ export function FeedbackWidget({
               </div>
             ) : (
               <form
-                action={async (fd) => { await action(fd); setSent(true); }}
+                action={async (fd) => { await action(fd); setFileNames([]); setSent(true); }}
               >
                 <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 12 }}>Feedback geben</div>
                 <input type="hidden" name="kind" value={kind} />
@@ -109,6 +110,22 @@ export function FeedbackWidget({
                     fontSize: 14, resize: "vertical", outline: "none",
                   }}
                 />
+                <label style={{ display: "block", marginTop: 10 }}>
+                  <span style={{ fontSize: 12, color: "#9aa0aa" }}>Anhänge (optional, z. B. Screenshot)</span>
+                  <input
+                    type="file"
+                    name="files"
+                    multiple
+                    accept="image/*,application/pdf,.log,.txt"
+                    onChange={(e) => setFileNames(Array.from(e.target.files ?? []).map((f) => f.name))}
+                    style={{ display: "block", marginTop: 4, fontSize: 12, color: "#c7ccd4", width: "100%" }}
+                  />
+                  {fileNames.length > 0 && (
+                    <span style={{ display: "block", marginTop: 4, fontSize: 12, color: brandColor }}>
+                      {fileNames.length} Datei{fileNames.length > 1 ? "en" : ""}: {fileNames.join(", ")}
+                    </span>
+                  )}
+                </label>
                 {platformOptionLabel && (
                   <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12, fontSize: 13, color: "#9aa0aa", cursor: "pointer" }}>
                     <input
