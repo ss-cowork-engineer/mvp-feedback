@@ -33,6 +33,7 @@ export async function sendFeedback(fd: FormData) {
     {
       kind: fd.get("kind") === "bug" ? "bug" : "feature",
       text: String(fd.get("text") ?? ""),
+      attachments: await attachmentsFromFormData(fd),   // optional, s. u.
       submitter: session ? { name: session.name, email: session.email } : null,
     },
   );
@@ -46,9 +47,27 @@ import { sendFeedback } from "./feedback-action";
 <FeedbackWidget action={sendFeedback} brandColor="#e20074" />
 ```
 
+## Datei-Anhänge (Screenshots etc.)
+Das Widget hat ein Datei-Feld. Anhänge werden als **GitHub-Release-Assets** am Release
+`feedback-attachments` hochgeladen (Tag via `attachmentReleaseTag` überschreibbar) und im
+Issue-Body verlinkt — bei öffentlichen Repos als **Inline-Bild**, bei privaten als
+**klickbarer Link** (für eingeloggte Board-Mitglieder). **Kein Repo-Commit → kein Deploy.**
+So reisen Anhänge mit aufs Board, ohne separaten App-Login (der alte Magenta-Bug).
+
+Consumer-Seite: `attachmentsFromFormData(fd)` zieht die Dateien aus dem FormData (Base64,
+Grenzen 5×10 MB). **Wichtig:** Next.js begrenzt Server-Action-Bodies auf 1 MB — im
+Consumer hochsetzen:
+```ts
+const nextConfig = {
+  transpilePackages: ["mvp-feedback"],
+  experimental: { serverActions: { bodySizeLimit: "12mb" } },
+};
+```
+
 ## Runtime-Voraussetzung
-`GH_PROJECT_TOKEN` (oder `config.tokenEnv`) = GitHub-Token mit `repo` (+ `project` fürs Board)
-als Server-Env (z. B. Vercel). Ohne Token: still no-op (best-effort).
+`GH_PROJECT_TOKEN` (oder `config.tokenEnv`) = GitHub-Token mit `repo` (+ `project` fürs Board;
+`contents`/Releases-Schreibrecht für Anhänge) als Server-Env (z. B. Vercel). Ohne Token:
+still no-op (best-effort).
 
 ## Wiederverwendbarkeit
 - Kein hartkodiertes Repo/Board — alles Config.
