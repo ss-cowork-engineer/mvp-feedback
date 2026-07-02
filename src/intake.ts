@@ -1,4 +1,4 @@
-import type { FeedbackConfig, IntakeAttachment, IntakeInput, IntakeResult, IntakeTarget } from "./config";
+import type { CreateBoardIssueInput, FeedbackConfig, IntakeAttachment, IntakeInput, IntakeResult, IntakeTarget } from "./config";
 
 const DEFAULT_ATTACHMENT_TAG = "feedback-attachments";
 
@@ -178,8 +178,57 @@ function buildBody(input: IntakeInput): string {
   return `${input.text}\n\n---\n_In-App-Meldung von ${who}._`;
 }
 
+// ── Low-Level-Primitive ─────────────────────────────────────────────────────
+// createBoardIssue: legt ein Issue an (Labels sichergestellt), hängt es best-
+// effort aufs Board und setzt die Ziel-Spalte. Token wird DIREKT übergeben —
+// so kann jeder Consumer seine eigene Token-Auflösung nutzen (Magenta-Chain).
+// Wirft nie; teilbare GitHub-Plumbing für submitFeedback UND fremde Adapter.
+export async function createBoardIssue(input: CreateBoardIssueInput): Promise<IntakeResult> {
+  const { token, repo } = input;
+  if (!token) return { ok: false, error: "no token" };
+
+  // Labels sicherstellen (idempotent; existierende Farben bleiben unangetastet).
+  for (const label of input.labels ?? []) {
+    await ensureLabel(token, repo, label, "ededed");
+  }
+
+  // 1) Issue anlegen.
+  const issue = await ghRest(token, "POST", `/repos/${repo}/issues`, {
+    title: input.title,
+    body: input.body,
+    labels: input.labels ?? [],
+  });
+  const contentId = issue?.node_id as string | undefined;
+  const number = issue?.number as number | undefined;
+  const htmlUrl = issue?.html_url as string | undefined;
+  if (!contentId || !number || !htmlUrl) return { ok: false, error: "issue creation failed" };
+  const result: IntakeResult = { ok: true, issueNumber: number, issueUrl: htmlUrl };
+
+  // 2) Aufs Board (optional, best-effort).
+  if (!input.boardProjectId) return result;
+  const added = await ghGraphql(
+    token,
+    `mutation($p:ID!,$c:ID!){ addProjectV2ItemById(input:{projectId:$p,contentId:$c}){ item { id } } }`,
+    { p: input.boardProjectId, c: contentId },
+  );
+  const itemId = ((added?.addProjectV2ItemById as GhJson | undefined)?.item as GhJson | undefined)?.id as
+    | string
+    | undefined;
+  if (!itemId || !input.statusFieldId || !input.columnName) return result;
+
+  // 3) Ziel-Spalte setzen (per Name aufgelöst; fehlt sie → ohne Status).
+  const optionId = await resolveColumnOptionId(token, input.statusFieldId, input.columnName);
+  if (!optionId) return result;
+  await ghGraphql(
+    token,
+    `mutation($p:ID!,$i:ID!,$f:ID!,$o:String!){ updateProjectV2ItemFieldValue(input:{projectId:$p,itemId:$i,fieldId:$f,value:{singleSelectOptionId:$o}}){ projectV2Item { id } } }`,
+    { p: input.boardProjectId, i: itemId, f: input.statusFieldId, o: optionId },
+  );
+  return result;
+}
+
 export async function submitFeedback(config: FeedbackConfig, input: IntakeInput): Promise<IntakeResult> {
-  const token = process.env[config.tokenEnv ?? "GH_PROJECT_TOKEN"];
+  const token = config.token ?? process.env[config.tokenEnv ?? "GH_PROJECT_TOKEN"];
   if (!token) return { ok: false, error: "no token configured" };
   if (!input.text?.trim()) return { ok: false, error: "empty text" };
 
@@ -189,7 +238,7 @@ export async function submitFeedback(config: FeedbackConfig, input: IntakeInput)
     input.scope === "platform" && config.platform ? config.platform : config;
 
   const typeLabel = input.kind === "bug" ? "type:bug" : "type:feature";
-  // Labels sicherstellen (Farben: bug=rot, feature=blau, app=magenta).
+  // Labels mit Marken-Farben sicherstellen (bug=rot, feature=grün, app=magenta).
   await ensureLabel(token, target.repo, typeLabel, input.kind === "bug" ? "d73a4a" : "0e8a16");
   await ensureLabel(token, target.repo, target.appLabel, "e20074");
 
@@ -197,37 +246,14 @@ export async function submitFeedback(config: FeedbackConfig, input: IntakeInput)
   // sie mit aufs Board reisen (best-effort; Fehler = Body ohne Anhänge).
   const attachmentSection = await buildAttachmentSection(token, target, input.attachments);
 
-  // 1) Issue anlegen.
-  const issue = await ghRest(token, "POST", `/repos/${target.repo}/issues`, {
+  return createBoardIssue({
+    token,
+    repo: target.repo,
     title: deriveTitle(input),
     body: buildBody(input) + attachmentSection,
     labels: [typeLabel, target.appLabel],
+    boardProjectId: target.boardProjectId,
+    statusFieldId: target.statusFieldId,
+    columnName: target.columnName,
   });
-  const contentId = issue?.node_id as string | undefined;
-  const number = issue?.number as number | undefined;
-  const htmlUrl = issue?.html_url as string | undefined;
-  if (!contentId || !number || !htmlUrl) return { ok: false, error: "issue creation failed" };
-  const result: IntakeResult = { ok: true, issueNumber: number, issueUrl: htmlUrl };
-
-  // 2) Aufs Board (optional, best-effort).
-  if (!target.boardProjectId) return result;
-  const added = await ghGraphql(
-    token,
-    `mutation($p:ID!,$c:ID!){ addProjectV2ItemById(input:{projectId:$p,contentId:$c}){ item { id } } }`,
-    { p: target.boardProjectId, c: contentId },
-  );
-  const itemId = ((added?.addProjectV2ItemById as GhJson | undefined)?.item as GhJson | undefined)?.id as
-    | string
-    | undefined;
-  if (!itemId || !target.statusFieldId || !target.columnName) return result;
-
-  // 3) Ziel-Spalte setzen (per Name aufgelöst; fehlt sie → ohne Status).
-  const optionId = await resolveColumnOptionId(token, target.statusFieldId, target.columnName);
-  if (!optionId) return result;
-  await ghGraphql(
-    token,
-    `mutation($p:ID!,$i:ID!,$f:ID!,$o:String!){ updateProjectV2ItemFieldValue(input:{projectId:$p,itemId:$i,fieldId:$f,value:{singleSelectOptionId:$o}}){ projectV2Item { id } } }`,
-    { p: target.boardProjectId, i: itemId, f: target.statusFieldId, o: optionId },
-  );
-  return result;
 }

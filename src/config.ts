@@ -41,6 +41,23 @@ export interface FeedbackConfig extends IntakeTarget {
   platform?: IntakeTarget;
   /** Env-Variable mit dem GitHub-Token (Default: GH_PROJECT_TOKEN). */
   tokenEnv?: string;
+  /**
+   * Direkter Token — hat Vorrang vor tokenEnv/Default. Für Consumer mit eigener
+   * Token-Auflösung (z. B. Magenta OS: GH_PAT_SERVER→GH_PROJECT_TOKEN→GH_TOKEN).
+   */
+  token?: string;
+}
+
+/** Eingaben für die Low-Level-Primitive createBoardIssue (Issue + Board + Spalte). */
+export interface CreateBoardIssueInput {
+  token: string;
+  repo: string;
+  title: string;
+  body: string;
+  labels?: string[];
+  boardProjectId?: string;
+  statusFieldId?: string;
+  columnName?: string;
 }
 
 export type FeedbackScope = "app" | "platform";

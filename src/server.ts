@@ -1,5 +1,5 @@
 // Server-Einstieg: der Intake (nur aus Server-Actions/Route-Handlern importieren).
-export { submitFeedback } from "./intake";
+export { submitFeedback, createBoardIssue } from "./intake";
 export { attachmentsFromFormData } from "./form-data";
 export type {
   FeedbackConfig,
@@ -9,4 +9,5 @@ export type {
   IntakeAttachment,
   IntakeTarget,
   FeedbackScope,
+  CreateBoardIssueInput,
 } from "./config";
