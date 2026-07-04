@@ -69,7 +69,32 @@ const nextConfig = {
 `contents`/Releases-Schreibrecht für Anhänge) als Server-Env (z. B. Vercel). Ohne Token:
 still no-op (best-effort).
 
+## Rückkanal / Request-Status (`mvp-feedback/return-channel`)
+Framework-agnostische Domänenlogik für den Einreicher-Rückkanal (aus Magenta OS
+#1431 extrahiert): Board-Spalte → nutzerfreundliche Status-Stufe, plus Overlay für
+offene Team-Rückfragen (`awaitingReply` = Einreicher ist am Zug). Keine DB, kein
+React, kein GitHub — der Consumer liefert die Daten, das Paket leitet den Zustand ab.
+
+```ts
+import { resolveRequestState } from "mvp-feedback/return-channel";
+
+const state = resolveRequestState({
+  columnName: "In Progress",          // Board-Spalte des Issues
+  issueClosed: false,
+  clarifications: [                    // Rückfrage-Thread (aus eigener Persistenz)
+    { direction: "to_user", createdAt: new Date() },
+  ],
+  // columnMap: { Backlog: "planned" } // optional: eigene Spaltennamen
+});
+// → { status: "awaitingReply", boardStatus: "inProgress", awaitingReply: true, order }
+```
+
+Bausteine einzeln: `mapRequestStatus`, `overlayStatus`, `hasOpenClarification`,
+`openClarificationKeys` (Batch-Overlay über viele Requests), `REQUEST_STATUS_ORDER`,
+`DEFAULT_COLUMN_TO_STATUS`. Alles auch aus `mvp-feedback` re-exportiert.
+
 ## Wiederverwendbarkeit
 - Kein hartkodiertes Repo/Board — alles Config.
-- Getrennte Entry-Points: `mvp-feedback` (Client-Widget) · `mvp-feedback/server` (Intake).
+- Getrennte Entry-Points: `mvp-feedback` (Client-Widget) · `mvp-feedback/server` (Intake)
+  · `mvp-feedback/return-channel` (Status-/Rückfrage-Logik, framework-agnostisch).
 - Später als GitHub-Packages-npm-Paket veröffentlichbar (`publishConfig` gesetzt).

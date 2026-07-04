@@ -4,6 +4,7 @@ import {
   hasOpenClarification,
   overlayStatus,
   openClarificationKeys,
+  resolveRequestState,
   REQUEST_STATUS_ORDER,
   DEFAULT_COLUMN_TO_STATUS,
 } from "./return-channel";
@@ -89,6 +90,48 @@ describe("openClarificationKeys (Batch)", () => {
     expect(keys.has("feature-a")).toBe(false);
     expect(keys.has("bug-b")).toBe(true);
     expect(keys.size).toBe(1);
+  });
+});
+
+describe("resolveRequestState (Composer)", () => {
+  it("Board-Status ohne Rückfrage: durchgereicht", () => {
+    const s = resolveRequestState({ columnName: "In Progress" });
+    expect(s.status).toBe("inProgress");
+    expect(s.boardStatus).toBe("inProgress");
+    expect(s.awaitingReply).toBe(false);
+    expect(s.order).toBe(REQUEST_STATUS_ORDER.indexOf("inProgress"));
+  });
+
+  it("offene to_user-Rückfrage überlagert zu awaitingReply, Board-Status bleibt erhalten", () => {
+    const s = resolveRequestState({
+      columnName: "In Progress",
+      clarifications: [{ direction: "to_user", createdAt: d("2026-01-01") }],
+    });
+    expect(s.status).toBe("awaitingReply");
+    expect(s.boardStatus).toBe("inProgress");
+    expect(s.awaitingReply).toBe(true);
+  });
+
+  it("beantwortete Rückfrage (letzte to_team) → kein Overlay", () => {
+    const s = resolveRequestState({
+      columnName: "Next",
+      clarifications: [
+        { direction: "to_user", createdAt: d("2026-01-01") },
+        { direction: "to_team", createdAt: d("2026-01-02") },
+      ],
+    });
+    expect(s.status).toBe("planned");
+    expect(s.awaitingReply).toBe(false);
+  });
+
+  it("geschlossenes Issue (nicht done) → closed", () => {
+    const s = resolveRequestState({ columnName: "In Progress", issueClosed: true });
+    expect(s.status).toBe("closed");
+  });
+
+  it("respektiert eine eigene columnMap", () => {
+    const s = resolveRequestState({ columnName: "Backlog", columnMap: { Backlog: "planned" } });
+    expect(s.status).toBe("planned");
   });
 });
 

@@ -115,3 +115,38 @@ export function openClarificationKeys<
   }
   return open;
 }
+
+// ------------------------------------------------------------
+// Composer (ergonomische Ein-Aufruf-API)
+// ------------------------------------------------------------
+
+// Vollständiger einreicher-seitiger Zustand eines Requests.
+export type RequestState = {
+  status: RequestStatusKey; // finaler Anzeige-Status (Rückfrage-Overlay berücksichtigt)
+  boardStatus: RequestStatusKey; // reiner Board-Status (ohne Overlay)
+  awaitingReply: boolean; // Einreicher ist am Zug (offene `to_user`-Rückfrage)
+  order: number; // Index in REQUEST_STATUS_ORDER (für Fortschrittsanzeigen)
+};
+
+// Leitet aus Board-Signal (Spalte + Issue offen/zu) UND dem Rückfrage-Thread den
+// kompletten Zustand ab — mapRequestStatus + overlayStatus + hasOpenClarification
+// in einem Aufruf, damit Consumer die drei Bausteine nicht selbst verketten.
+export function resolveRequestState(input: {
+  columnName?: string | null;
+  issueClosed?: boolean;
+  clarifications?: ClarificationMessage[];
+  columnMap?: Record<string, RequestStatusKey>;
+}): RequestState {
+  const boardStatus = mapRequestStatus(input.columnName, {
+    issueClosed: input.issueClosed,
+    columnMap: input.columnMap,
+  });
+  const messages = input.clarifications ?? [];
+  const status = overlayStatus(boardStatus, messages);
+  return {
+    status,
+    boardStatus,
+    awaitingReply: hasOpenClarification(messages),
+    order: REQUEST_STATUS_ORDER.indexOf(status),
+  };
+}
